@@ -60,10 +60,12 @@
 
 package iai.co.il.streamer;
 
-import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.hardware.Camera;
@@ -73,40 +75,50 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.PowerManager;
+import android.support.v4.content.LocalBroadcastManager;
+import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.Toolbar;
 import android.util.Log;
-import android.view.Display;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
+import android.view.MenuItem;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.View.OnClickListener;
-import android.view.WindowManager;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.RelativeLayout;
+import android.widget.ListView;
+
+import com.android.volley.RequestQueue;
+import com.android.volley.toolbox.Volley;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.nio.ShortBuffer;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.FFmpegFrameRecorder;
 
 
-public class MainActivity extends Activity implements OnClickListener {
+public class MainActivity extends AppCompatActivity {
 
     private final static String CLASS_LABEL = "RecordActivity";
     private final static String LOG_TAG = CLASS_LABEL;
 
     private PowerManager.WakeLock mWakeLock;
 
-    private String ffmpeg_link = "udp://10.0.0.2:9999";
-
+    private String url = "10.0.0.2";
+    private int port=9999;
     long startTime = 0;
     boolean recording = false;
 
@@ -120,6 +132,9 @@ public class MainActivity extends Activity implements OnClickListener {
     private int frameRate = 30;
     private String format="mpegts";
     private static final String MY_PREFS_NAME="il.co.iai.streamer";
+    private ListView listView=null;
+    ArrayAdapter arrayAdapter=null;
+    RequestQueue queue;
 
 
     /* audio data getting thread */
@@ -133,7 +148,8 @@ public class MainActivity extends Activity implements OnClickListener {
     private CameraView cameraView;
 
     private Frame yuvImage = null;
-    private Button btnRecorderControl;
+    private Toolbar toolbar;
+    private MenuItem streamButton;
 
 
     @Override
@@ -142,12 +158,39 @@ public class MainActivity extends Activity implements OnClickListener {
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
 
         setContentView(R.layout.activity_main);
+        toolbar=(Toolbar)findViewById(R.id.toolbar);
+        toolbar.setOnMenuItemClickListener(new Toolbar.OnMenuItemClickListener() {
+            @Override
+            public boolean onMenuItemClick(MenuItem item) {
+               if(item.getItemId()==R.id.action_settings){
+                   openSettings();
+                   return true;
+               }
+                if(item.getItemId()==R.id.action_play){
+                    if(recording){
+                        if(streamButton==null){
+                            streamButton=item;
+                        }
+                        openCapture();
+
+                    }
+                    else{
+                        item.setIcon(R.drawable.ic_stop);
+                        stopRecording();
+                    }
+
+                    return true;
+                }
+                return false;
+            }
+        });
 
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         mWakeLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK, CLASS_LABEL);
         mWakeLock.acquire();
-
+        queue= Volley.newRequestQueue(this);
         initLayout();
+        registerRecivers();
     }
 
 
@@ -199,9 +242,6 @@ public class MainActivity extends Activity implements OnClickListener {
 
         LinearLayout mainLayout = (LinearLayout) this.findViewById(R.id.record_layout);
 
-        btnRecorderControl = (Button) findViewById(R.id.recorder_control);
-        btnRecorderControl.setText("Start");
-        btnRecorderControl.setOnClickListener(this);
         cameraDevice = Camera.open();
 
         Log.i(LOG_TAG, "cameara open");
@@ -226,8 +266,8 @@ public class MainActivity extends Activity implements OnClickListener {
             Log.i(LOG_TAG, "create yuvImage");
         }
 
-        Log.i(LOG_TAG, "ffmpeg_url: " + ffmpeg_link);
-        recorder = new FFmpegFrameRecorder(ffmpeg_link, imageWidth, imageHeight, 1);
+        Log.i(LOG_TAG,"protocol: udp"+ "ffmpeg_url: " + url +" port: " + port);
+        recorder = new FFmpegFrameRecorder("udp://"+url+":"+port, imageWidth, imageHeight, 1);
         recorder.setFormat(format);
         recorder.setSampleRate(sampleAudioRateInHz);
         // Set in the surface changed method
@@ -298,6 +338,8 @@ public class MainActivity extends Activity implements OnClickListener {
 
         return super.onKeyDown(keyCode, event);
     }
+
+
 
 
     //---------------------------------------------
@@ -491,14 +533,124 @@ public class MainActivity extends Activity implements OnClickListener {
         }
 
 
+    private void registerRecivers(){
+        BroadcastReceiver receiver= new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                Serializable s=intent.getSerializableExtra("response");
+                if(s instanceof  CategoryListHolder){
+                    List<Category> cats= ((CategoryListHolder)s).getList();
+                    for(Category category: cats){
+                        if(!DataHolder.categories.contains(category)){
+                            DataHolder.categories.add(category);
+                        }
+                    }
+                }
+            }
+        };
+        IntentFilter filter= new IntentFilter("il.co.iai.cats");
 
-    public void popDialogBox(){
+
+
+        BroadcastReceiver receiverSetCat= new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+              startRecording();
+            }
+        };
+        IntentFilter filterSetCat= new IntentFilter("il.co.iai.cats.set");
+
+
+        LocalBroadcastManager localBroadcastManager=LocalBroadcastManager.getInstance(this);
+        localBroadcastManager.registerReceiver(receiver,filter);
+        localBroadcastManager.registerReceiver(receiverSetCat, filterSetCat);
+    }
+
+    private void requestCategories(String serverUrl){
+        Map<String,String> headers= new HashMap<>();
+        String path=serverUrl+"/rest/categories";
+        RequestListener<CategoryListHolder> listener= new RequestListener<>("il.co.iai.cats",this);
+        ErrorListener errorListener = new ErrorListener("il.co.iai.cats.error",this);
+        JsonRequest<CategoryListHolder> categoryListHolderJsonRequest = new JsonRequest<>(path,CategoryListHolder.class,headers,listener,errorListener);
+        queue.add(categoryListHolderJsonRequest);
+    }
+
+    private void setCategory(String serverUrl){
+        if(DataHolder.selected!=null){
+            Map<String,String> headers= new HashMap<>();
+            String path="http://"+serverUrl+"/rest/plugins/iai/stream/"+DataHolder.selected.getId();
+            RequestListener<Serializable> listener= new RequestListener<>("il.co.iai.cats.set",this);
+            ErrorListener errorListener = new ErrorListener("il.co.iai.cats.set.error",this);
+            VoidJsonRequest setCat = new VoidJsonRequest(path,Serializable.class,headers,listener,errorListener);
+            queue.add(setCat);
+        }else{
+            startRecording();
+        }
+
+
+    }
+
+
+    public void openCapture(){
+
+
+
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        // Get the layout inflater
+        LayoutInflater inflater = getLayoutInflater();
+
+
+        // Inflate and set the layout for the dialog
+        // Pass null as the parent view because its going in the dialog layout
+        View v=inflater.inflate(R.layout.capture_dialog_box, null);
+        if(listView==null){
+            listView=(ListView)v.findViewById(R.id.listView);
+            arrayAdapter =new ArrayAdapter<Category>(this,R.layout.item,DataHolder.categories);
+            listView.setAdapter(arrayAdapter);
+            listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+                @Override
+                public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                    Object o = arrayAdapter.getItem(position);
+                    if (o instanceof Category) {
+                        DataHolder.selected=(Category)o;
+                    }
+                }
+            });
+
+
+        }
+
+        builder.setView(v)
+
+                // Add action buttons
+                .setPositiveButton(R.string.ok, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int id) {
+                        if (streamButton != null) {
+                            streamButton.setIcon(R.drawable.ic_stop);
+                        }
+                        setCategory(url);
+
+                    }
+                })
+                .setNegativeButton(R.string.cancel, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int id) {
+                        dialog.cancel();
+                    }
+                });
+        builder.create().show();
+
+    }
+
+
+    public void openSettings(){
 
 
 
         SharedPreferences prefs = getSharedPreferences(MY_PREFS_NAME, MODE_PRIVATE);
-        final String url = prefs.getString("url", ffmpeg_link);
-        Log.i("url",url);
+        final String urlP = prefs.getString("url", url);
+        final int portP = prefs.getInt("port", port);
 
             AlertDialog.Builder builder = new AlertDialog.Builder(this);
             // Get the layout inflater
@@ -507,9 +659,11 @@ public class MainActivity extends Activity implements OnClickListener {
 
             // Inflate and set the layout for the dialog
             // Pass null as the parent view because its going in the dialog layout
-        View v=inflater.inflate(R.layout.dialogbox_layout, null);
+        View v=inflater.inflate(R.layout.settings_dialog_box, null);
         final EditText text = (EditText) v.findViewById(R.id.address);
-        text.setText(url);
+        final EditText portV= (EditText) v.findViewById(R.id.port);
+        text.setText(urlP);
+        portV.setText(portP+"");
             builder.setView(v)
 
                     // Add action buttons
@@ -518,9 +672,11 @@ public class MainActivity extends Activity implements OnClickListener {
                         public void onClick(DialogInterface dialog, int id) {
 
                             SharedPreferences prefs = getSharedPreferences(MY_PREFS_NAME, MODE_PRIVATE);
-                            ffmpeg_link = text.getText().toString();
-                            prefs.edit().putString("url", ffmpeg_link);
-                            startRecording();
+                            url = text.getText().toString();
+                            port = Integer.parseInt(portV.getText().toString());
+                            prefs.edit().putString("url", url).putInt("port",port);
+                            requestCategories("http://"+url+"/FlexiCore/");
+
                         }
                     })
                     .setNegativeButton(R.string.cancel, new DialogInterface.OnClickListener() {
@@ -532,18 +688,5 @@ public class MainActivity extends Activity implements OnClickListener {
 
     }
 
-    @Override
-    public void onClick(View v) {
-        if (!recording) {
-            popDialogBox();
 
-            Log.w(LOG_TAG, "Start Button Pushed");
-            btnRecorderControl.setText("Stop");
-        } else {
-            // This will trigger the audio recording loop to stop and then set isRecorderStart = false;
-            stopRecording();
-            Log.w(LOG_TAG, "Stop Button Pushed");
-            btnRecorderControl.setText("Start");
-        }
-    }
 }

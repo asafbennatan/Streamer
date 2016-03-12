@@ -14,4 +14,14 @@
         android:layout_marginBottom="4dp"
         android:hint="@string/ip" />
 
+    <EditText
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:inputType="numberDecimal"
+        android:ems="10"
+        android:id="@+id/port"
+        android:layout_gravity="right"
+        android:hint="port" />
+
+
 </LinearLayout>
