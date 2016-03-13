@@ -16,6 +16,7 @@ public class ErrorListener<T extends Serializable> implements Response.ErrorList
 
     public ErrorListener(String name, Context context) {
         this.name=name;
+        this.context=context;
     }
 
 

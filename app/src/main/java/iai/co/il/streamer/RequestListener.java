@@ -24,7 +24,10 @@ public class RequestListener<T extends Serializable> implements Response.Listene
     public void onResponse(T response) {
         LocalBroadcastManager localBroadcastManager = LocalBroadcastManager.getInstance(context);
         Intent intent = new Intent(name);
-        intent.putExtra("response",response);
+        if(response!=null){
+            intent.putExtra("response", response);
+
+        }
         localBroadcastManager.sendBroadcast(intent);
     }
 }

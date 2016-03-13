@@ -2,6 +2,7 @@ package iai.co.il.streamer;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -16,7 +17,7 @@ public class DataHolder {
     public static ArrayList<Category> categories= new ArrayList<>();
     public static Category selected=null;
 
-    private static ObjectMapper mapper= new ObjectMapper();
+    private static ObjectMapper mapper= new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     public static <T> List<T> jsonToList(String json,TypeReference<List<T>> ref) throws IOException {
         JsonNode node = mapper.readTree(json);

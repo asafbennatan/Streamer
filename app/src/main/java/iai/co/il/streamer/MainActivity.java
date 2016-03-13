@@ -81,11 +81,13 @@ import android.support.v7.widget.Toolbar;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
+import android.view.Menu;
 import android.view.MenuItem;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.View.OnClickListener;
+import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -100,6 +102,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.nio.ShortBuffer;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -150,6 +153,7 @@ public class MainActivity extends AppCompatActivity {
     private Frame yuvImage = null;
     private Toolbar toolbar;
     private MenuItem streamButton;
+    private AlertDialog dialog;
 
 
     @Override
@@ -159,31 +163,10 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
         toolbar=(Toolbar)findViewById(R.id.toolbar);
-        toolbar.setOnMenuItemClickListener(new Toolbar.OnMenuItemClickListener() {
-            @Override
-            public boolean onMenuItemClick(MenuItem item) {
-               if(item.getItemId()==R.id.action_settings){
-                   openSettings();
-                   return true;
-               }
-                if(item.getItemId()==R.id.action_play){
-                    if(recording){
-                        if(streamButton==null){
-                            streamButton=item;
-                        }
-                        openCapture();
 
-                    }
-                    else{
-                        item.setIcon(R.drawable.ic_stop);
-                        stopRecording();
-                    }
+    setSupportActionBar(toolbar);
+        getSupportActionBar().setTitle(R.string.app_name);
 
-                    return true;
-                }
-                return false;
-            }
-        });
 
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         mWakeLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK, CLASS_LABEL);
@@ -191,6 +174,7 @@ public class MainActivity extends AppCompatActivity {
         queue= Volley.newRequestQueue(this);
         initLayout();
         registerRecivers();
+        buildCaptureDB();
     }
 
 
@@ -373,8 +357,9 @@ public class MainActivity extends AppCompatActivity {
 
                 //Log.v(LOG_TAG,"recording? " + recording);
                 bufferReadResult = audioRecord.read(audioData.array(), 0, audioData.capacity());
-                audioData.limit(bufferReadResult);
+
                 if (bufferReadResult > 0) {
+                    audioData.limit(bufferReadResult);
                     Log.v(LOG_TAG, "bufferReadResult: " + bufferReadResult);
 
                     // If "recording" isn't true when start this thread, it never get's set according to this if statement...!!!
@@ -538,12 +523,14 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onReceive(Context context, Intent intent) {
                 Serializable s=intent.getSerializableExtra("response");
-                if(s instanceof  CategoryListHolder){
-                    List<Category> cats= ((CategoryListHolder)s).getList();
+                if(s instanceof  Category[]){
+                    List<Category> cats= Arrays.asList((Category[]) s);
                     for(Category category: cats){
                         if(!DataHolder.categories.contains(category)){
                             DataHolder.categories.add(category);
+
                         }
+                        arrayAdapter.notifyDataSetChanged();
                     }
                 }
             }
@@ -568,17 +555,19 @@ public class MainActivity extends AppCompatActivity {
 
     private void requestCategories(String serverUrl){
         Map<String,String> headers= new HashMap<>();
-        String path=serverUrl+"/rest/categories";
-        RequestListener<CategoryListHolder> listener= new RequestListener<>("il.co.iai.cats",this);
+        headers.put("Content-Type","application/json");
+        headers.put("Accepts","application/json");
+        String path="http://10.0.0.7:8080/FlexiCore/rest/plugins/iai/stream/media";
+        RequestListener<Category[]> listener= new RequestListener<>("il.co.iai.cats",this);
         ErrorListener errorListener = new ErrorListener("il.co.iai.cats.error",this);
-        JsonRequest<CategoryListHolder> categoryListHolderJsonRequest = new JsonRequest<>(path,CategoryListHolder.class,headers,listener,errorListener);
+        JsonRequest<Category[]> categoryListHolderJsonRequest = new JsonRequest<>(path,Category[].class,headers,listener,errorListener);
         queue.add(categoryListHolderJsonRequest);
     }
 
     private void setCategory(String serverUrl){
         if(DataHolder.selected!=null){
             Map<String,String> headers= new HashMap<>();
-            String path="http://"+serverUrl+"/rest/plugins/iai/stream/"+DataHolder.selected.getId();
+            String path="http://"+serverUrl+":8080/FlexiCore/rest/plugins/iai/stream/"+DataHolder.selected.getId();
             RequestListener<Serializable> listener= new RequestListener<>("il.co.iai.cats.set",this);
             ErrorListener errorListener = new ErrorListener("il.co.iai.cats.set.error",this);
             VoidJsonRequest setCat = new VoidJsonRequest(path,Serializable.class,headers,listener,errorListener);
@@ -590,56 +579,58 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
+private void buildCaptureDB(){
+    AlertDialog.Builder builder = new AlertDialog.Builder(this);
+    // Get the layout inflater
+    LayoutInflater inflater = getLayoutInflater();
 
+
+    // Inflate and set the layout for the dialog
+    // Pass null as the parent view because its going in the dialog layout
+    View v=inflater.inflate(R.layout.capture_dialog_box, null);
+    if(listView==null){
+        listView=(ListView)v.findViewById(R.id.listView);
+        listView.setChoiceMode(AbsListView.CHOICE_MODE_SINGLE);
+        arrayAdapter =new ArrayAdapter<Category>(this,R.layout.item,DataHolder.categories);
+        listView.setAdapter(arrayAdapter);
+        listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                view.setSelected(true);
+                Object o = arrayAdapter.getItem(position);
+                if (o instanceof Category) {
+                    DataHolder.selected=(Category)o;
+                }
+            }
+        });
+
+
+    }
+
+    builder.setView(v)
+
+            // Add action buttons
+            .setPositiveButton(R.string.ok, new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int id) {
+                    if (streamButton != null) {
+                        streamButton.setIcon(R.drawable.ic_stop);
+                    }
+                    setCategory(url);
+
+                }
+            })
+            .setNegativeButton(R.string.cancel, new DialogInterface.OnClickListener() {
+                public void onClick(DialogInterface dialog, int id) {
+                    dialog.cancel();
+                }
+            });
+    dialog=builder.create();
+}
     public void openCapture(){
 
 
-
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        // Get the layout inflater
-        LayoutInflater inflater = getLayoutInflater();
-
-
-        // Inflate and set the layout for the dialog
-        // Pass null as the parent view because its going in the dialog layout
-        View v=inflater.inflate(R.layout.capture_dialog_box, null);
-        if(listView==null){
-            listView=(ListView)v.findViewById(R.id.listView);
-            arrayAdapter =new ArrayAdapter<Category>(this,R.layout.item,DataHolder.categories);
-            listView.setAdapter(arrayAdapter);
-            listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-                @Override
-                public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                    Object o = arrayAdapter.getItem(position);
-                    if (o instanceof Category) {
-                        DataHolder.selected=(Category)o;
-                    }
-                }
-            });
-
-
-        }
-
-        builder.setView(v)
-
-                // Add action buttons
-                .setPositiveButton(R.string.ok, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int id) {
-                        if (streamButton != null) {
-                            streamButton.setIcon(R.drawable.ic_stop);
-                        }
-                        setCategory(url);
-
-                    }
-                })
-                .setNegativeButton(R.string.cancel, new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface dialog, int id) {
-                        dialog.cancel();
-                    }
-                });
-        builder.create().show();
+        dialog.show();
 
     }
 
@@ -674,8 +665,8 @@ public class MainActivity extends AppCompatActivity {
                             SharedPreferences prefs = getSharedPreferences(MY_PREFS_NAME, MODE_PRIVATE);
                             url = text.getText().toString();
                             port = Integer.parseInt(portV.getText().toString());
-                            prefs.edit().putString("url", url).putInt("port",port);
-                            requestCategories("http://"+url+"/FlexiCore/");
+                            prefs.edit().putString("url", url).putInt("port", port).commit();
+                            requestCategories("http://" + url + ":8080/FlexiCore/");
 
                         }
                     })
@@ -687,6 +678,40 @@ public class MainActivity extends AppCompatActivity {
             builder.create().show();
 
     }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        // Inflate the menu; this adds items to the action bar if it is present.
+        getMenuInflater().inflate(R.menu.tool_bar_menu, menu);
+
+        return true;
+        //test
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.action_settings) {
+            openSettings();
+            return true;
+        }
+        if (item.getItemId() == R.id.action_play) {
+            if (!recording) {
+                if (streamButton == null) {
+                    streamButton = item;
+                }
+                openCapture();
+
+            } else {
+                item.setIcon(R.drawable.ic_play);
+                stopRecording();
+            }
+
+            return true;
+        }
+        return false;
+    }
+
+
 
 
 }
